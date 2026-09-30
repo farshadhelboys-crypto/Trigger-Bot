@@ -1,8 +1,6 @@
 #include "Logger.h"
 #include <Windows.h>
-#include <chrono>
-#include <iomanip>
-#include <sstream>
+#include <shlobj.h>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -22,7 +20,6 @@ Logger::Logger() {
         }
     } catch (...) {
     }
-    // Fallback: local logs folder
     if (!file_.is_open()) {
         try {
             fs::create_directories(L"logs");
@@ -31,9 +28,6 @@ Logger::Logger() {
         }
     }
 }
-
-// Need shell path — include after to avoid circular issues in some toolchains
-#include <shlobj.h>
 
 std::wstring Logger::Now() {
     SYSTEMTIME st{};
