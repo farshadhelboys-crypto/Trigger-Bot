@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <commctrl.h>
+#include <algorithm>
 
 #include "Config.h"
 #include "Logger.h"
@@ -22,9 +23,8 @@ static const int kH = 640;
 static HWND gHwnd = nullptr;
 static HWND gLogList = nullptr;
 static BotEngine* gBot = nullptr;
-static int gCaptureHotkey = 0; // 1=activate 2=armed 3=fast 4=stop
+static int gCaptureHotkey = 0;
 
-// Colors — neon cyber
 static COLORREF C_BG = RGB(6, 8, 12);
 static COLORREF C_PANEL = RGB(12, 16, 24);
 static COLORREF C_BORDER = RGB(0, 160, 255);
@@ -33,13 +33,11 @@ static COLORREF C_TEXT = RGB(230, 240, 255);
 static COLORREF C_MUTED = RGB(120, 140, 160);
 static COLORREF C_OK = RGB(40, 220, 140);
 static COLORREF C_WARN = RGB(255, 180, 40);
-static COLORREF C_ERR = RGB(255, 80, 90);
 
 static HFONT gFontTitle = nullptr;
 static HFONT gFontUI = nullptr;
 static HFONT gFontSmall = nullptr;
 static HBRUSH gBrushBg = nullptr;
-static HBRUSH gBrushPanel = nullptr;
 
 struct UiBtn {
     RECT rc{};
@@ -95,22 +93,20 @@ static void LayoutButtons() {
         b.id = id;
         gBtns.push_back(b);
     };
-    // Status toggles
     add(24, 150, 150, 36, L"ARM / DISARM", ID_ARM);
     add(186, 150, 180, 36, L"FAST SNIPER", ID_FAST);
     add(378, 150, 120, 36, L"SAVE", ID_SAVE);
     add(510, 150, 170, 36, L"CLEAR LOG", ID_CLEARLOG);
 
-    // Hotkey rows — click to rebind
     add(400, 210, 160, 28, L"Change", ID_HK_ACTIVATE);
     add(400, 246, 160, 28, L"Change", ID_HK_ARMED);
     add(400, 282, 160, 28, L"Change", ID_HK_FAST);
     add(400, 318, 160, 28, L"Change", ID_HK_STOP);
 
-    add(200, 360, 36, 28, L"-", ID_TOL_MINUS);
-    add(280, 360, 36, 28, L"+", ID_TOL_PLUS);
-    add(200, 396, 36, 28, L"-", ID_RXN_MINUS);
-    add(280, 396, 36, 28, L"+", ID_RXN_PLUS);
+    add(320, 360, 36, 28, L"-", ID_TOL_MINUS);
+    add(364, 360, 36, 28, L"+", ID_TOL_PLUS);
+    add(320, 396, 36, 28, L"-", ID_RXN_MINUS);
+    add(364, 396, 36, 28, L"+", ID_RXN_PLUS);
 }
 
 static void DrawRoundRect(HDC hdc, RECT rc, COLORREF fill, COLORREF border, int radius = 10) {
@@ -137,13 +133,11 @@ static void Paint(HWND hwnd) {
 
     FillRect(mem, &client, gBrushBg);
 
-    // Header bar
     RECT header{ 0, 0, client.right, 120 };
     HBRUSH hdrBr = CreateSolidBrush(RGB(8, 12, 20));
     FillRect(mem, &header, hdrBr);
     DeleteObject(hdrBr);
 
-    // Neon line under header
     HPEN neon = CreatePen(PS_SOLID, 2, C_ACCENT);
     HGDIOBJ oldPen = SelectObject(mem, neon);
     MoveToEx(mem, 0, 120, nullptr);
@@ -154,17 +148,19 @@ static void Paint(HWND hwnd) {
     SetBkMode(mem, TRANSPARENT);
     SetTextColor(mem, C_ACCENT);
     SelectObject(mem, gFontTitle);
-    TextOutW(mem, 24, 18, L"FARSHAD PM", 10);
+    TextOutW(mem, 24, 16, L"FARSHAD PM", 10);
 
     SetTextColor(mem, C_TEXT);
     SelectObject(mem, gFontUI);
-    TextOutW(mem, 24, 58, L"TRIGGER  /  AIMING  TOOL", 24);
+    TextOutW(mem, 24, 54, L"TRIGGER  /  AIMING  TOOL", 24);
 
     SetTextColor(mem, C_MUTED);
     SelectObject(mem, gFontSmall);
-    TextOutW(mem, 24, 88, L"\x0633\x0627\x062e\x062a\x0647 \x0634\x062f\x0647 \x062a\x0648\x0633\x0637 \x0641\x0631\x0634\x0627\x062f\x06cc \x067e\x06cc \x0627\x0645   |   Support: @farshad_pm_org", 60);
+    // Built by Farshadi PM | Support
+    const wchar_t* credit =
+        L"Sakhteh shode tavassot-e Farshadi PM  |  Support: @farshad_pm_org";
+    TextOutW(mem, 24, 86, credit, (int)wcslen(credit));
 
-    // Status panel
     RECT panel{ 16, 136, client.right - 16, 430 };
     DrawRoundRect(mem, panel, C_PANEL, RGB(20, 40, 60), 12);
 
@@ -175,27 +171,16 @@ static void Paint(HWND hwnd) {
     TextOutW(mem, 24, 200, st.c_str(), (int)st.size());
 
     SetTextColor(mem, c.fastSniperEnabled ? C_ACCENT : C_MUTED);
-    std::wstring fs = c.fastSniperEnabled ? L"FAST SNIPER: ON  (Q+Q in 0.5s)" : L"FAST SNIPER: OFF";
-    TextOutW(mem, 24, 228, fs.c_str(), (int)fs.size());
+    std::wstring fs = c.fastSniperEnabled ? L"FAST SNIPER: ON  (Q + Q in 0.5s)" : L"FAST SNIPER: OFF";
+    TextOutW(mem, 280, 200, fs.c_str(), (int)fs.size());
 
     if (gBot) {
         wchar_t buf[64];
         swprintf_s(buf, L"Triggers: %llu", gBot->TriggerCount());
         SetTextColor(mem, C_TEXT);
-        TextOutW(mem, 24, 256, buf, (int)wcslen(buf));
+        TextOutW(mem, 24, 228, buf, (int)wcslen(buf));
     }
 
-    // Hotkey labels
-    SetTextColor(mem, C_MUTED);
-    SelectObject(mem, gFontSmall);
-    TextOutW(mem, 24, 214, L"", 0); // spacer already used
-    int y = 214;
-    // redraw hotkey section cleanly at fixed y
-    y = 214;
-    (void)y;
-
-    SetTextColor(mem, C_TEXT);
-    SelectObject(mem, gFontUI);
     auto row = [&](int yy, const wchar_t* label, int vk) {
         SetTextColor(mem, C_MUTED);
         SelectObject(mem, gFontSmall);
@@ -211,19 +196,18 @@ static void Paint(HWND hwnd) {
     row(322, L"Emergency Stop", c.vkEmergencyStop);
 
     wchar_t tbuf[64];
-    swprintf_s(tbuf, L"Color tolerance: %d", c.colorTolerance);
     SetTextColor(mem, C_TEXT);
+    SelectObject(mem, gFontUI);
+    swprintf_s(tbuf, L"Color tolerance: %d", c.colorTolerance);
     TextOutW(mem, 24, 364, tbuf, (int)wcslen(tbuf));
     swprintf_s(tbuf, L"Reaction ms: %d", c.reactionMs);
     TextOutW(mem, 24, 400, tbuf, (int)wcslen(tbuf));
 
     if (gCaptureHotkey) {
         SetTextColor(mem, C_WARN);
-        SelectObject(mem, gFontUI);
-        TextOutW(mem, 400, 360, L"Press a key...", 14);
+        TextOutW(mem, 420, 360, L"Press a key...", 14);
     }
 
-    // Buttons
     for (auto& b : gBtns) {
         COLORREF fill = b.hover ? RGB(18, 36, 56) : RGB(14, 22, 34);
         COLORREF border = C_BORDER;
@@ -236,12 +220,10 @@ static void Paint(HWND hwnd) {
         DrawTextW(mem, b.label.c_str(), -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    // Footer
     SetTextColor(mem, C_MUTED);
     SelectObject(mem, gFontSmall);
-    TextOutW(mem, 24, client.bottom - 28,
-              L"Play smart, not hard  ·  FARSHAD PM CHEATS",
-              42);
+    const wchar_t* foot = L"Play smart, not hard  ·  FARSHAD PM CHEATS";
+    TextOutW(mem, 24, client.bottom - 28, foot, (int)wcslen(foot));
 
     BitBlt(hdc, 0, 0, client.right, client.bottom, mem, 0, 0, SRCCOPY);
     SelectObject(mem, oldBmp);
@@ -276,10 +258,10 @@ static void HandleBtn(int id) {
     case ID_HK_ARMED: gCaptureHotkey = 2; log.Info(L"Rebind Armed — press a key"); break;
     case ID_HK_FAST: gCaptureHotkey = 3; log.Info(L"Rebind Fast Sniper — press a key"); break;
     case ID_HK_STOP: gCaptureHotkey = 4; log.Info(L"Rebind Emergency — press a key"); break;
-    case ID_TOL_MINUS: c.colorTolerance = max(0, c.colorTolerance - 1); c.Save(); break;
-    case ID_TOL_PLUS: c.colorTolerance = min(64, c.colorTolerance + 1); c.Save(); break;
-    case ID_RXN_MINUS: c.reactionMs = max(0, c.reactionMs - 1); c.Save(); break;
-    case ID_RXN_PLUS: c.reactionMs = min(100, c.reactionMs + 1); c.Save(); break;
+    case ID_TOL_MINUS: c.colorTolerance = (std::max)(0, c.colorTolerance - 1); c.Save(); break;
+    case ID_TOL_PLUS: c.colorTolerance = (std::min)(64, c.colorTolerance + 1); c.Save(); break;
+    case ID_RXN_MINUS: c.reactionMs = (std::max)(0, c.reactionMs - 1); c.Save(); break;
+    case ID_RXN_PLUS: c.reactionMs = (std::min)(100, c.reactionMs + 1); c.Save(); break;
     }
     InvalidateRect(gHwnd, nullptr, FALSE);
 }
@@ -313,7 +295,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         int x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam);
         bool changed = false;
         for (auto& b : gBtns) {
-            bool h = PtInRect(&b.rc, POINT{ x, y });
+            bool h = PtInRect(&b.rc, POINT{ x, y }) != 0;
             if (h != b.hover) { b.hover = h; changed = true; }
         }
         if (changed) InvalidateRect(hwnd, nullptr, FALSE);
@@ -346,9 +328,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         break;
     }
     case WM_CTLCOLORLISTBOX: {
-        HDC hdc = (HDC)wParam;
-        SetTextColor(hdc, C_TEXT);
-        SetBkColor(hdc, RGB(10, 14, 22));
+        HDC dc = (HDC)wParam;
+        SetTextColor(dc, C_TEXT);
+        SetBkColor(dc, RGB(10, 14, 22));
         static HBRUSH br = CreateSolidBrush(RGB(10, 14, 22));
         return (LRESULT)br;
     }
@@ -378,7 +360,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nShow) {
                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                              DEFAULT_PITCH, L"Consolas");
     gBrushBg = CreateSolidBrush(C_BG);
-    gBrushPanel = CreateSolidBrush(C_PANEL);
 
     Config().Load();
 
@@ -414,6 +395,5 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nShow) {
     DeleteObject(gFontUI);
     DeleteObject(gFontSmall);
     DeleteObject(gBrushBg);
-    DeleteObject(gBrushPanel);
     return (int)msg.wParam;
 }
