@@ -2,6 +2,7 @@
 #include "Config.h"
 #include "Logger.h"
 #include <cmath>
+#include <algorithm>
 
 BotEngine::BotEngine() {
     screen_ = GetDC(nullptr);
@@ -51,9 +52,8 @@ void BotEngine::TapKey(int vk) {
 
 void BotEngine::FireFastSniper() {
     auto& c = Config();
-    // Exactly two Q presses inside the window (default 500ms)
     TapKey('Q');
-    Sleep((DWORD)max(1, c.fastSniperGapMs));
+    Sleep((DWORD)(std::max)(1, c.fastSniperGapMs));
     TapKey('Q');
     Logger::Instance().Success(L"Fast Sniper: Q + Q");
 }
@@ -73,11 +73,12 @@ void BotEngine::Stop() {
 void BotEngine::Loop() {
     auto& log = Logger::Instance();
     DWORD lastClick = 0;
+    bool prevArmedKey = false;
+    bool prevFsKey = false;
 
     while (running_) {
         auto& c = Config();
 
-        // Emergency stop
         if (KeyDown(c.vkEmergencyStop)) {
             c.armed = false;
             c.fastSniperEnabled = false;
@@ -86,8 +87,6 @@ void BotEngine::Loop() {
             continue;
         }
 
-        // Toggle armed (edge detect simple sleep)
-        static bool prevArmedKey = false;
         bool armedKey = KeyDown(c.vkToggleArmed);
         if (armedKey && !prevArmedKey) {
             c.armed = !c.armed;
@@ -96,8 +95,6 @@ void BotEngine::Loop() {
         }
         prevArmedKey = armedKey;
 
-        // Toggle fast sniper
-        static bool prevFsKey = false;
         bool fsKey = KeyDown(c.vkToggleFastSniper);
         if (fsKey && !prevFsKey) {
             c.fastSniperEnabled = !c.fastSniperEnabled;
@@ -111,10 +108,8 @@ void BotEngine::Loop() {
             continue;
         }
 
-        // Hold activate key → sample center pixel, fire on change
         if (KeyDown(c.vkActivate)) {
             COLORREF base = GetPixel(screen_, cx_, cy_);
-            // Small settle
             Sleep(2);
             while (running_ && KeyDown(c.vkActivate) && c.armed) {
                 COLORREF now = GetPixel(screen_, cx_, cy_);
@@ -131,7 +126,6 @@ void BotEngine::Loop() {
                             FireFastSniper();
                         }
 
-                        // Wait until pixel stabilizes or key released
                         int guard = 0;
                         while (running_ && KeyDown(c.vkActivate) && guard++ < 200) {
                             if (ColorDist(base, GetPixel(screen_, cx_, cy_)) <= c.colorTolerance)
@@ -141,7 +135,7 @@ void BotEngine::Loop() {
                         base = GetPixel(screen_, cx_, cy_);
                     }
                 }
-                Sleep(1); // high responsiveness without 100% CPU spin
+                Sleep(1);
             }
         } else {
             Sleep(5);
